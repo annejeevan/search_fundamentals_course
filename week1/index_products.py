@@ -9,6 +9,7 @@ from opensearchpy import OpenSearch
 from opensearchpy.helpers import bulk
 import logging
 
+import time
 from time import perf_counter
 import concurrent.futures
 
@@ -85,7 +86,16 @@ def get_opensearch():
     port = 9200
     auth = ('admin', 'admin')
     #### Step 2.a: Create a connection to OpenSearch
-    client = None
+    client = OpenSearch(
+        hosts=[{'host': host, 'port':port}],
+        http_compress=True,
+        http_auth=auth,
+        use_ssl=True,
+        verify_certs=False,
+        ssl_assert_hostname=False,
+        ssl_show_warn=False,        
+    )
+    #client = None
     return client
 
 
@@ -96,6 +106,8 @@ def index_file(file, index_name):
     tree = etree.parse(file)
     root = tree.getroot()
     children = root.findall("./product")
+    start_time = time.time()
+    total_count = 0
     docs = []
     for child in children:
         doc = {}
@@ -108,8 +120,22 @@ def index_file(file, index_name):
             continue
         #### Step 2.b: Create a valid OpenSearch Doc and bulk index 2000 docs at a time
         the_doc = None
-        docs.append(the_doc)
-
+        the_doc = {'_id':doc['sku'][0], '_index': index_name, '_source' : doc}	
+        docs.append(the_doc)	
+        docs_indexed += 1
+        total_count += docs_indexed
+        #bulk index for every 2000 documents
+        if docs_indexed % 2000 == 0:	
+            bulk(client, docs, request_timeout=60)	
+            print(total_count," documents indexed" )
+            docs = []	
+    # if < 2000 docs, then this code will be executed for indexing those documents
+    #print(docs)
+    if len(docs) > 0:	
+        total_count += docs_indexed
+        bulk(client, docs, request_timeout=60)	
+        print(total_count," documents indexed" )
+    print("--- %s seconds ---" % (time.time() - start_time))
     return docs_indexed
 
 @click.command()
